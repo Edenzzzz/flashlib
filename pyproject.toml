@@ -63,3 +63,8 @@ Issues = "https://github.com/FlashML-org/flashlib/issues"
 
 [tool.setuptools.packages.find]
 include = ["flashlib*"]
+
+[tool.setuptools.package-data]
+# Ship the vibecuda CUDA sources with the wheel/sdist: the JIT extension is
+# compiled from these files on first use (torch.utils.cpp_extension.load).
+"flashlib.primitives.kmeans.vibecuda" = ["csrc/*.cu", "csrc/*.cuh"]

@@ -50,6 +50,16 @@ def flash_kmeans_cutedsl(x, n_clusters, **kw):
     return flash_kmeans(x, n_clusters, backend="cutedsl", **kw)
 
 
+def flash_kmeans_vibecuda(x, n_clusters, **kw):
+    """Force the fused native-CUDA VibeCUDA backend.
+
+    Constraints: Blackwell sm100/sm103, bf16 input, D=128, 2<=K<=1024,
+    fixed iteration count (tol=0.0). Raises VibeCudaKmeansUnsupported
+    (via flash_kmeans) rather than silently rerouting when outside regime.
+    """
+    return flash_kmeans(x, n_clusters, backend="vibecuda", **kw)
+
+
 cutedsl_assign_euclid = lazy_attr(
     "flashlib.primitives.kmeans.cutedsl",
     "cutedsl_assign_euclid",
@@ -66,12 +76,29 @@ blackwell_assign_supported = lazy_attr(
     "flashlib.primitives.kmeans.cutedsl",
     "blackwell_assign_supported",
 )
+vibecuda_assign_euclid = lazy_attr(
+    "flashlib.primitives.kmeans.vibecuda",
+    "vibecuda_assign_euclid",
+)
+vibecuda_kmeans_Euclid = lazy_attr(
+    "flashlib.primitives.kmeans.vibecuda",
+    "vibecuda_kmeans_Euclid",
+)
+vibecuda_kmeans_supported = lazy_attr(
+    "flashlib.primitives.kmeans.vibecuda",
+    "vibecuda_kmeans_supported",
+)
+VibeCudaKmeansUnsupported = lazy_attr(
+    "flashlib.primitives.kmeans.vibecuda",
+    "VibeCudaKmeansUnsupported",
+)
 
 
 __all__ = [
     "flash_kmeans",
     "flash_kmeans_triton",
     "flash_kmeans_cutedsl",
+    "flash_kmeans_vibecuda",
     "batch_kmeans_Euclid",
     "batch_kmeans_Cosine",
     "batch_kmeans_Dot",
@@ -89,5 +116,9 @@ __all__ = [
     "cutedsl_kmeans_Euclid",
     "blackwell_assign_euclid",
     "blackwell_assign_supported",
+    "vibecuda_assign_euclid",
+    "vibecuda_kmeans_Euclid",
+    "vibecuda_kmeans_supported",
+    "VibeCudaKmeansUnsupported",
     "cost",
 ]
