@@ -49,6 +49,11 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "flash_kmeans":              ("flashlib.primitives.kmeans", "flash_kmeans"),
     "flash_kmeans_triton":       ("flashlib.primitives.kmeans", "flash_kmeans_triton"),
     "flash_kmeans_cutedsl":      ("flashlib.primitives.kmeans", "flash_kmeans_cutedsl"),
+    "flash_kmeans_vibecuda":     ("flashlib.primitives.kmeans", "flash_kmeans_vibecuda"),
+    "vibecuda_assign_euclid":    ("flashlib.primitives.kmeans", "vibecuda_assign_euclid"),
+    "vibecuda_kmeans_Euclid":    ("flashlib.primitives.kmeans", "vibecuda_kmeans_Euclid"),
+    "vibecuda_kmeans_supported": ("flashlib.primitives.kmeans", "vibecuda_kmeans_supported"),
+    "VibeCudaKmeansUnsupported": ("flashlib.primitives.kmeans", "VibeCudaKmeansUnsupported"),
     # knn -- single fused entry point (Triton default, CuteDSL FA3 opt-in).
     "flash_knn":                  ("flashlib.primitives.knn", "flash_knn"),
     "flash_knn_triton":           ("flashlib.primitives.knn", "flash_knn_triton"),

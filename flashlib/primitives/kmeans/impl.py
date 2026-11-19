@@ -4,12 +4,19 @@ Public entry point: :func:`flash_kmeans`. The hand-tuned routing rule
 lives in :func:`_route` (formerly ``route.py``).
 
 Backends:
-    backend="triton"   -- split-D + per-arch heuristic Triton (default).
-    backend="cutedsl"  -- Hopper FA3-style fused TMA+WGMMA assign
-                          (H100/H200, B=1, fp16/bf16, D <= 512). Falls
-                          back to Triton when the kernel cannot run
-                          (B>1, large D). Needs ``flashlib[cutedsl]``.
-    backend="torch"    -- pure-torch chunked reference (CPU-OK).
+    backend="triton"    -- split-D + per-arch heuristic Triton (default on
+                           non-Blackwell GPUs and outside the vibecuda regime).
+    backend="cutedsl"   -- Hopper FA3-style fused TMA+WGMMA assign
+                           (H100/H200, B=1, fp16/bf16, D <= 512); on Blackwell
+                           a tcgen05 variant (B=1, fp16/bf16, D in {64,128,256},
+                           N % 128 == 0, K % 256 == 0). Falls back to Triton
+                           when the kernel cannot run (B>1, large D). Needs
+                           ``flashlib[cutedsl]``.
+    backend="vibecuda"  -- fused native-CUDA assign + sort-reduce update
+                           (Blackwell sm100/sm103, bf16, D=128, 2<=K<=1024).
+                           Explicit selection outside this regime raises
+                           VibeCudaKmeansUnsupported.
+    backend="torch"     -- pure-torch chunked reference (CPU-OK).
 
 Variant aliases inside Triton:
     variant="default"  -- one-shot Lloyd step (assign + update fused
@@ -39,6 +46,11 @@ from flashlib.primitives.kmeans.triton.kmeans import (
     batch_kmeans_Cosine,
     batch_kmeans_Dot,
 )
+from flashlib.primitives.kmeans.vibecuda import (
+    VibeCudaKmeansUnsupported,
+    vibecuda_kmeans_Euclid,
+    vibecuda_kmeans_support_error,
+)
 
 
 Backend = str
@@ -52,6 +64,8 @@ def _route(
     N: int,
     D: int,
     K: int,
+    dtype: Optional[torch.dtype] = None,
+    tol: float = 0.0,
     metric: str = "euclidean",
     backend: Optional[str] = None,
     variant: Optional[str] = None,
@@ -83,6 +97,20 @@ def _route(
     hw = hw or _hw.current()
     if not hw.is_cuda:
         return "torch", None
+    # Blackwell (sm_100/sm_103): the fused native-CUDA VibeCUDA kernel covers
+    # the KDA Lloyd/assign contract (bf16, D=128, 2<=K<=1024, any B, tol=0.0)
+    # with a single fused assign + sort-reduce update per iteration. It
+    # dominates both the Triton and CuteDSL paths inside this regime.
+    if (
+        hw.is_blackwell
+        and metric == "euclidean"
+        and dtype == torch.bfloat16
+        and D == 128
+        and 2 <= K <= 1024
+        and N >= 2
+        and tol == 0.0
+    ):
+        return "vibecuda", variant
     # Blackwell (sm_100): the CuteDSL Lloyd loop uses the dedicated tcgen05
     # assign kernel, which beats Triton across its whole supported regime
     # (B=1, bf16, D in {64,128,256}, N % 128 == 0, K % 256 == 0).
@@ -132,7 +160,11 @@ def flash_kmeans(
         precision tol used by other flashlib dispatchers -- k-means has
         no residual concept).
     metric : {"euclidean", "cosine", "dot"}.
-    backend : {"triton", "cutedsl", "torch"}, optional.
+    backend : {"triton", "cutedsl", "vibecuda", "torch"}, optional.
+        ``"vibecuda"`` selects the fused native-CUDA kernel (Blackwell
+        sm100/sm103, bf16, D=128, 2<=K<=1024, fixed iteration count) and
+        raises ``VibeCudaKmeansUnsupported`` rather than silently routing
+        elsewhere when the call is outside its regime.
     variant : str, optional -- backend-specific.
     """
     if x.ndim == 2:
@@ -143,12 +175,22 @@ def flash_kmeans(
         squeeze_out = False
     B_, N_, D_ = x_b.shape
     chosen, _variant = _route(
-        B=B_, N=N_, D=D_, K=n_clusters, metric=metric,
-        backend=backend, variant=variant,
+        B=B_, N=N_, D=D_, K=n_clusters, dtype=x_b.dtype, tol=tol,
+        metric=metric, backend=backend, variant=variant,
     )
     if chosen == "cutedsl" and backend is None and not has_cutedsl():
         chosen = "triton"
-    if chosen == "torch":
+    if chosen == "vibecuda":
+        if metric != "euclidean":
+            raise NotImplementedError(
+                f"vibecuda backend currently supports euclidean only "
+                f"(got {metric!r}); use backend='triton' for cosine/dot."
+            )
+        cluster_ids, centroids, n_iter = vibecuda_kmeans_Euclid(
+            x_b, n_clusters, max_iters=max_iters, tol=tol,
+            init_centroids=init_centroids, verbose=verbose, **kwargs,
+        )
+    elif chosen == "torch":
         if metric != "euclidean":
             raise NotImplementedError(
                 f"torch fallback only supports euclidean (got {metric!r})"
